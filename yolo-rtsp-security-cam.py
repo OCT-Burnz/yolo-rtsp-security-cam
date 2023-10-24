@@ -1,9 +1,3 @@
-# Copyright (c) 2023, Phazer Tech
-# All rights reserved.
-
-# View the GNU AFFERO license found in the
-# LICENSE file in the root directory.
-
 import time
 import os
 import cv2
@@ -13,37 +7,20 @@ import numpy as np
 from datetime import datetime
 from ffmpeg import FFmpeg
 from skimage.metrics import mean_squared_error as ssim
-from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter, BooleanOptionalAction
 from sshkeyboard import listen_keyboard, stop_listening
+from config import Config
+cfg = Config()
+cfg.load_from_file('config.yaml')
 
-# Parse command line arguments
-parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
-parser.add_argument("--stream", type=str, help="RTSP address of video stream.")
-parser.add_argument('--monitor', default=False, action=BooleanOptionalAction, help="View the live stream. If no monitor is connected then leave this disabled (no Raspberry Pi SSH sessions).")
-parser.add_argument("--yolo", type=str, help="Enables YOLO object detection. Enter a comma separated list of objects you'd like the program to record. The list can be found in the coco.names file")
-parser.add_argument("--model", default='yolov8n', type=str, help="Specify which model size you want to run. Default is the nano model.")
-parser.add_argument("--threshold", default=350, type=int, choices=range(1,10000), help="Determines the amount of motion required to start recording. Higher values decrease sensitivity to help reduce false positives. Default 350, max 10000.")
-parser.add_argument("--start_frames", default=3, type=int, choices=range(1,30), help="Number of consecutive frames with motion required to start recording. Raising this might help if there's too many false positive recordings, especially with a high frame rate stream of 60 FPS. Default 3, max 30.")
-parser.add_argument("--tail_length", default=8, type=int, choices=range(1,30), help="Number of seconds without motion required to stop recording. Raise this value if recordings are stopping too early. Default 8, max 30.")
-parser.add_argument("--auto_delete", default=False, action=BooleanOptionalAction, help="Enables auto-delete feature. Recordings that have total length equal to the tail_length value (seconds) are assumed to be false positives and are auto-deleted.")
-parser.add_argument('--testing', default=False, action=BooleanOptionalAction, help="Testing mode disables recordings and prints out the motion value for each frame if greater than threshold. Helps fine tune the threshold value.")
-parser.add_argument('--frame_click', default=False, action=BooleanOptionalAction, help="Allows user to advance frames one by one by pressing any key. For use with testing mode on video files, not live streams, so set a video file instead of an RTSP address for the --stream argument.")
-args = vars(parser.parse_args())
+rtsp_stream = cfg.video
 
-rtsp_stream = args["stream"]
-monitor = args["monitor"]
-thresh = args["threshold"]
-start_frames = args["start_frames"]
-tail_length = args["tail_length"]
-auto_delete = args["auto_delete"]
-testing = args["testing"]
-frame_click = args["frame_click"]
-if frame_click:
-    testing = True
-    monitor = True
+if cfg.frame_click:
+    cfg.testing = True
+    cfg.monitor = True
     print("frame_click enabled. Press any key to advance the frame by one, or hold down the key to advance faster. Make sure the video window is selected, not the terminal, when advancing frames.")
-if args["yolo"]:
-    yolo_list = [s.strip() for s in args["yolo"].split(",")]
+    
+if len(cfg.yolo) > 0:
+    yolo_list = cfg.yolo
     yolo_on = True
 else:
     yolo_on = False
@@ -54,11 +31,10 @@ if yolo_on:
     stop_error = False
 
     CONFIDENCE = 0.5
-    font_scale = 1
-    thickness = 1
+
     labels = open("coco.names").read().strip().split("\n")
     colors = np.random.randint(0, 255, size=(len(labels), 3), dtype="uint8")
-    model = YOLO(args["model"]+".pt")
+    model = YOLO(cfg.model + ".pt")
 
     # Check if the user provided list has valid objects
     for coconame in yolo_list:
@@ -73,7 +49,7 @@ loop = True
 cap = cv2.VideoCapture(rtsp_stream)
 fps = cap.get(cv2.CAP_PROP_FPS)
 period = 1/fps
-tail_length = tail_length*fps
+tail_length = cfg.tail_length * fps
 recording = False
 ffmpeg_copy = 0
 activity_count = 0
@@ -87,7 +63,7 @@ blank = np.zeros((res[1],res[0]), np.uint8)
 resized_frame = cv2.resize(img, res)
 gray_frame = cv2.cvtColor(resized_frame,cv2.COLOR_BGR2GRAY)
 old_frame = cv2.GaussianBlur(gray_frame, (5,5), 0)
-if monitor:
+if cfg.monitor:
     cv2.namedWindow(rtsp_stream, cv2.WINDOW_NORMAL)
 
 q = queue.Queue()
@@ -171,20 +147,22 @@ def process_yolo():
 
         # Draw a bounding box rectangle and label on the image
         color = [int(c) for c in colors[class_id]]
-        cv2.rectangle(img, (xmin, ymin), (xmax, ymax), color=color, thickness=thickness)
+        cv2.rectangle(img, (xmin, ymin), (xmax, ymax), color=color, thickness=1)
         text = f"{labels[class_id]}: {confidence:.2f}"
         # Calculate text width & height to draw the transparent boxes as background of the text
-        (text_width, text_height) = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, fontScale=font_scale, thickness=thickness)[0]
+        (text_width, text_height) = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, fontScale=1, thickness=1)[0]
         text_offset_x = xmin
         text_offset_y = ymin - 5
         box_coords = ((text_offset_x, text_offset_y), (text_offset_x + text_width + 2, text_offset_y - text_height))
         overlay = img.copy()
         cv2.rectangle(overlay, box_coords[0], box_coords[1], color=color, thickness=cv2.FILLED)
+
         # Add opacity (transparency to the box)
         img = cv2.addWeighted(overlay, 0.6, img, 0.4, 0)
+        
         # Now put the text (label: confidence %)
         cv2.putText(img, text, (xmin, ymin - 5), cv2.FONT_HERSHEY_SIMPLEX,
-            fontScale=font_scale, color=(0, 0, 0), thickness=thickness)
+            fontScale=1, color=(0, 0, 0), thickness=1)
 
     return object_found
 
@@ -214,16 +192,16 @@ while loop:
         old_frame = final_frame
 
         # Print value for testing mode
-        if testing and ssim_val > thresh:
+        if cfg.testing and ssim_val > cfg.threshold:
             print("motion: "+ str(ssim_val))
 
         # Count the number of frames where the ssim value exceeds the threshold value.
         # If the number of these frames exceeds start_frames value, run YOLO detection.
         # Start recording if an object from the user provided list is detected
         if not recording:
-            if ssim_val > thresh:
+            if ssim_val > cfg.threshold:
                 activity_count += 1
-                if activity_count >= start_frames:
+                if activity_count >= cfg.start_frames:
                     if yolo_on:
                         if process_yolo():
                             yolo_count += 1
@@ -231,7 +209,7 @@ while loop:
                             yolo_count = 0
                     if not yolo_on or yolo_count > 1:
                         filedate = datetime.now().strftime('%H-%M-%S')
-                        if not testing:
+                        if not cfg.testing:
                             folderdate = datetime.now().strftime('%Y-%m-%d')
                             if not os.path.isdir(folderdate):
                                 os.mkdir(folderdate)
@@ -261,18 +239,18 @@ while loop:
         # If already recording, count the number of frames where there's no motion activity
         # or no object detected and stop recording if it exceeds the tail_length value
         else:
-            if yolo_on and not process_yolo() or not yolo_on and ssim_val < thresh:
+            if yolo_on and not process_yolo() or not yolo_on and ssim_val < cfg.threshold:
                 activity_count += 1
                 if activity_count >= tail_length:
                     filedate = datetime.now().strftime('%H-%M-%S')
-                    if not testing:
+                    if not cfg.testing:
                         ffmpeg_copy.terminate()
                         ffmpeg_thread.join()
                         ffmpeg_copy = 0
                         print(filedate + " recording stopped")
                         # If auto_delete argument was provided, delete recording if total
                         # length is equal to the tail_length value, indicating a false positive
-                        if auto_delete:
+                        if cfg.auto_delete:
                             recorded_file = cv2.VideoCapture(filename)
                             recorded_frames = recorded_file.get(cv2.CAP_PROP_FRAME_COUNT)
                             if recorded_frames < tail_length + (fps/2) and os.path.isfile(filename):
@@ -286,9 +264,9 @@ while loop:
                 activity_count = 0
 
         # Monitor the stream
-        if monitor:
+        if cfg.monitor:
             cv2.imshow(rtsp_stream, img)
-            if frame_click:
+            if cfg.frame_click:
                 cv_key = cv2.waitKey(0) & 0xFF
                 if cv_key == ord("q"):
                     loop = False

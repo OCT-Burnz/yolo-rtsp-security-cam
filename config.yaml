@@ -1,0 +1,13 @@
+auto_delete: false
+frame_click: false
+model: yolov8n
+monitor: false
+start_frames: 3
+video: rtsp://192.168.1.56/channel_1
+tail_length: 8
+testing: false
+threshold: 350
+yolo:
+- person
+- cat
+- dog

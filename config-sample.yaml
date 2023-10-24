@@ -1,0 +1,32 @@
+# RTSP address of video stream, e.g rtsp://username:password@192.168.1.50/channel_1
+stream: null
+
+# View the live stream. If no monitor is connected then leave this disabled (no Raspberry Pi SSH sessions).
+monitor: false
+
+# Enables YOLO object detection. Enter a comma separated list of objects you'd like the program to record.
+yolo:
+  - person
+  - car
+  - dog
+
+# Specify which model size you want to run. Default is the nano model.
+model: "yolov8n"
+
+# Determines the amount of motion required to start recording.
+threshold: 350
+
+# Number of consecutive frames with motion required to start recording.
+start_frames: 3
+
+# Number of seconds without motion required to stop recording.
+tail_length: 8
+
+# Enables auto-delete feature.
+auto_delete: false
+
+# Testing mode disables recordings and prints out the motion value for each frame if greater than threshold.
+testing: false
+
+# Allows user to advance frames one by one by pressing any key.
+frame_click: false
